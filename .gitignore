@@ -16,3 +16,9 @@ infer_out/
 
 .vscode
 .ipynb_checkpoints/
+
+# Test data
+samples/*.wav
+samples/*.mp3
+samples/test.ds
+
