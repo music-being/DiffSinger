@@ -16,6 +16,9 @@
 
 import mido
 
+# default tempo per beat (in us):  120 beats per minute
+DEFAULT_TEMPO = 60000000 // 120
+
 
 def midi2ds(midi_file: str, output_file: str) -> None:
     """ Convert an annotated MIDI file to a DiffSinger file.
@@ -27,10 +30,18 @@ def midi2ds(midi_file: str, output_file: str) -> None:
         output_file: the output DiffSinger file.
     """
 
+    tempo = DEFAULT_TEMPO
+
     midi = mido.MidiFile(midi_file)
     for tid, track in enumerate(midi.tracks):
         print(f"Track {tid}: {track.name} ({len(track)} messages)")
-        for (i, msg) in enumerate(track):
-            print(f"  {i}: {msg}")
+        for i, msg in enumerate(track):
+            if msg.type == "end_of_track":
+                break
+            if msg.type == "set_tempo":
+                tempo = msg.tempo
+                print(f"  Updated tempo to {tempo}.")
+            print(msg)
+        print(f"  End of track {tid}.")
 
 

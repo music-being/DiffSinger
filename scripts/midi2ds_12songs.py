@@ -15,14 +15,13 @@
 # limitations under the License.
 
 import sys
-from glob import glob
 from pathlib import Path
 from midi2ds import midi2ds
 
 root_dir = Path(__file__).parent.parent.resolve()
-
 sys.path.insert(0, str(root_dir))
 
+NUM_MIDI_FILES = 12
 
 if __name__ == "__main__":
     source_dir = root_dir.joinpath("samples", "12-songs")
@@ -36,7 +35,7 @@ if __name__ == "__main__":
         print(f"Destination directory {dest_dir} does not exist.")
         sys.exit(1)
 
-    midi_files = glob(str(source_dir.joinpath("*", "*.mid")), recursive=False)
+    midi_files = [source_dir / f"{i:d}/{i:d}.mid" for i in range(1, NUM_MIDI_FILES + 1)]
 
     for file in midi_files:
         print(f"Processing {file}...")
