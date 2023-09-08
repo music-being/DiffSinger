@@ -16,12 +16,15 @@
 
 import mido
 import json
+import librosa
+from collections import OrderedDict
 
 # default tempo per beat (in us):  120 beats per minute
 DEFAULT_TEMPO = 60000000 // 120
 DICTIONARY_FILE = "dictionaries/opencpop-extension.txt"
 PHONEME_FILE = "dictionaries/phoneme.txt"
 AP_TIME_IN_MS = 200
+F0_TIMESTEP = 0.005
 
 # load dictionaries
 with open(DICTIONARY_FILE, "r", encoding="utf8") as f:
@@ -145,6 +148,7 @@ def _align_midi_info(midi_info: list[(int, dict[str])],
                     midi_info.insert(idx,
                                      (ts, {"note": 0, "duration": ap_duration, "tempo": tempo,
                                            "lyric": "<AP>", "syllable": "<AP>"}))
+                    idx += 1
 
             if idx >= len(midi_info):
                 raise Exception(f"Cannot find syllable {current_syllable_word} in MIDI information list.")
@@ -153,16 +157,81 @@ def _align_midi_info(midi_info: list[(int, dict[str])],
             idx += 1
 
 
-def _make_ds(midi_info: list[(int, dict[str])]) -> [dict[str]]:
+def _make_f0_seq(note: int, duration: int, tempo: int, ticks_per_beat: int) -> str:
+    """Make the F0 sequence from note and duration.
+
+        Args:
+            note: the MIDI note.
+            duration: the duration of the note.
+            tempo: the tempo of the note.
+            ticks_per_beat: number of ticks per beat in the MIDI file.
+    """
+
+    f0 = librosa.midi_to_hz(note) if note != 0 else 0
+    repeats = int(duration * tempo / 1000000.0 / ticks_per_beat / F0_TIMESTEP)
+    f0_seq = " ".join([f"{f0:.3f}"] * repeats)
+    return f0_seq
+
+
+def _make_ds(midi_info: list[(int, dict[str])],
+             ticks_per_beat: int) -> [dict[str]]:
     """Make the DiffSinger file from midi information list.
 
         Args:
             midi_info: the MIDI information list.
+            ticks_per_beat: number of ticks per beat in the MIDI file.
 
         Returns:
             The DiffSinger file.
     """
     ds = []
+    current_dict = OrderedDict()
+    for mi in midi_info:
+        ts = mi[0]
+        if "lyric" not in mi[1]:
+            continue
+        if mi[1]["lyric"] == "<AP>":
+            if current_dict != {}:
+                ds.append(current_dict)
+                current_dict = OrderedDict()
+            current_dict["offset"] = ts * mi[1]["tempo"] / 1000000.0 / ticks_per_beat
+            current_dict["text"] = "AP"
+            current_dict["ph_seq"] = "AP"
+            current_dict["ph_dur"] = "{:.3f}".format(mi[1]["duration"] * mi[1]["tempo"] / 1000000.0 / ticks_per_beat)
+            current_dict["ph_num"] = "1"
+            current_dict["note_seq"] = "REST"
+            current_dict["note_dur"] = "{:.3f}".format(mi[1]["duration"] * mi[1]["tempo"] / 1000000.0 / ticks_per_beat)
+            current_dict["note_slur"] = "0"
+            current_dict["f0_seq"] = _make_f0_seq(0, mi[1]["duration"], mi[1]["tempo"], ticks_per_beat)
+            current_dict["f0_timestep"] = "{:.3f}".format(F0_TIMESTEP)
+        else:
+            if current_dict == {}:
+                continue
+            lyric = mi[1]["lyric"] if mi[1]["lyric"] != "<SP>" else "SP"
+            current_dict["text"] += (" " + lyric)
+            num_ph = len(mi[1]["phoneme"]) if mi[1]["lyric"] != "<SP>" else 1
+            current_dict["ph_num"] += (" " + str(num_ph))
+            current_dict["note_dur"] += " {:.3f}".format(
+                mi[1]["duration"] * mi[1]["tempo"] / 1000000.0 / ticks_per_beat
+            )
+            current_dict["note_slur"] += " 0"
+            current_dict["f0_seq"] = _make_f0_seq(
+                0, mi[1]["duration"], mi[1]["tempo"], ticks_per_beat
+            )
+            current_dict["f0_timestep"] = "{:.3f}".format(F0_TIMESTEP)
+            if mi[1]["lyric"] != "<SP>":
+                current_dict["ph_seq"] += (" " + " ".join([p[0] for p in mi[1]["phoneme"]]))
+                current_dict["ph_dur"] += (" " + " ".join(["{:.3f}".format(p[1] * mi[1]["tempo"] / 1000000.0 /
+                                                           ticks_per_beat) for p in mi[1]["phoneme"]]))
+                current_dict["note_seq"] += (" " + librosa.midi_to_note(mi[1]["note"]))
+            else:
+                current_dict["ph_seq"] += " SP"
+                current_dict["ph_dur"] += " {:.3f}".format(mi[1]["duration"] * mi[1]["tempo"]
+                                                           / 1000000.0 / ticks_per_beat)
+                current_dict["note_seq"] += " REST"
+    if current_dict != {}:
+        ds.append(current_dict)
+
     return ds
 
 
@@ -223,9 +292,9 @@ def midi2ds(midi_file: str,
     print(midi_info)
 
     # Make the DiffSinger file from midi info list
-    ds = _make_ds(midi_info)
+    ds = _make_ds(midi_info, ticks_per_beat)
 
     # Write the DiffSinger file
-    ds_json_obj = json.dumps(ds, indent=2)
+    ds_json_obj = json.dumps(ds, indent=2, ensure_ascii=False).encode("utf8")
     with open(output_file, "w", encoding="utf8") as f:
-        f.write(ds_json_obj)
+        f.write(ds_json_obj.decode())
